@@ -280,6 +280,17 @@ test("VERIFIED_EFFORTS 只收录 validating 结论", () => {
   assert.equal(m.VERIFIED_EFFORTS["qwen3-32b"], undefined, "non-validating 的模型不该进基线");
 });
 
+test("未在基线里的模型：reasoning=false 只表示没测过，不是上游不支持", () => {
+  // 这是界面上最容易误导用户的一点：
+  //   reasoning=false 有两层含义 ——「上游确实不支持」和「还没测过」
+  // 客户端必须靠 probeState 区分，不能把两者混成一个"不支持"列表。
+  // 实测：glm-5.1/5.2、kimi-k2.6、DeepSeek-V4-Flash 都能探测（会拒绝非法值），
+  // 只是不在基线里 —— 它们必须出现在"还没测过"而不是"不支持"里。
+  const out = m.resolveReasoning({ id: "glm-5.1", reasoning: true }, undefined);
+  assert.equal(out.reasoning, false, "没探测过就不给档位，这是对的");
+  assert.equal(m.VERIFIED_EFFORTS["glm-5.1"], undefined, "但它不在基线里，不代表上游拒绝该参数");
+});
+
 // ── 汇总 ────────────────────────────────────────────────────────────────
 rmSync(dir, { recursive: true, force: true });
 
