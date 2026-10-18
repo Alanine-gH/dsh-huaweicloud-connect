@@ -131,6 +131,7 @@ test("导出 name / inject / apply", () => {
   assert.equal(typeof module.apply, "function");
   assert.equal(typeof module.name, "string");
   assert.ok(Array.isArray(module.inject));
+  assert.equal(typeof module.ConfigPage, "function", "未导出 ConfigPage（t 为 null 的回归测试要用）");
 });
 
 test("inject 只声明 slots 与 locale（不碰别的）", () => {
@@ -523,6 +524,40 @@ test("三处 fetch 都带 credentials: same-origin", () => {
   assert.ok(
     withCreds.length >= fetches.length,
     `fetch ${fetches.length} 处但 same-origin 只有 ${withCreds.length} 处 —— 有请求没带，回环闸会判 403`,
+  );
+});
+
+test("宿主没注入 t 时不崩（回退到 key 本身）", () => {
+  // 真实故障（线上 Console 实测）：
+  //   TypeError: Cannot read properties of null (reading 'key')
+  //     at ConfigPageView (client.js)
+  // 宿主在某些时序下不把 t 注入 props，组件里直接 t("x") 就崩，整页白屏。
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (String(url).includes("/key")) return { ok: true, status: 200, text: async () => "k" };
+    return { ok: true, status: 200, json: async () => ({ products: [] }) };
+  };
+  try {
+    const { ConfigPage } = module;
+    assert.doesNotThrow(() => ConfigPage({ view: "page", t: null }), "t 为 null 时 ConfigPage 抛异常");
+    assert.doesNotThrow(() => ConfigPage({ view: "page" }), "t 缺失时 ConfigPage 抛异常");
+    assert.doesNotThrow(() => ConfigPage({ view: "summary", t: null }), "summary 分支崩");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("apply 不声明未使用的 ctx.locale.bind（它可能返回 null）", () => {
+  const source = readFileSync(new URL("../lib/client.js", import.meta.url), "utf8");
+  // 只看真正的代码，注释里提到这个名字是允许的（那里正好在解释为什么不用它）
+  const code = source
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("*") && !line.trim().startsWith("//") && !line.trim().startsWith("/*"))
+    .join("\n");
+  assert.equal(
+    code.includes("ctx.locale.bind("),
+    false,
+    "apply 里不该有 ctx.locale.bind(...)：可能返回 null，且组件的 t 由宿主按 props 注入",
   );
 });
 
