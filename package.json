@@ -1,0 +1,75 @@
+{
+  "name": "dsh-huaweicloud-connect",
+  "displayName": "DSH HuaweiCloud Connect",
+  "description": "将华为云 CodeArts 与 OfficeAce 桌面应用已登录的模型接入 DeepSeek Harness — 复用本地登录态，零额外配置。",
+  "version": "0.1.0",
+  "author": "Alanine-孔硕",
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "huaweicloud",
+    "codearts",
+    "officeace",
+    "model-provider"
+  ],
+  "type": "module",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "bin": {
+    "dsh-huaweicloud-connect": "lib/bin.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Alanine-gH/dsh-huaweicloud-connect.git"
+  },
+  "homepage": "https://github.com/Alanine-gH/dsh-huaweicloud-connect#readme",
+  "bugs": {
+    "url": "https://github.com/Alanine-gH/dsh-huaweicloud-connect/issues"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-locale"
+      ],
+      "platform": "web"
+    }
+  },
+  "dependencies": {
+    "@earendil-works/pi-ai": "1.3.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.5",
+    "@deepseek-ai/dsh-llm": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-llm-pi-ai": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-home-paths": "0.2.1-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.5"
+  },
+  "scripts": {
+    "test": "node test/selftest.mjs && node test/sign-selftest.mjs && node test/web-selftest.mjs && node test/client-selftest.mjs",
+    "test:live": "node test/live-probe.mjs",
+    "doctor": "node lib/bin.js doctor"
+  }
+}

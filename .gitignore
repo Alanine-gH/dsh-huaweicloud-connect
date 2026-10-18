@@ -1,0 +1,8 @@
+node_modules/
+lib/*.js.map
+*.tsbuildinfo
+.DS_Store
+Thumbs.db
+*.log
+.env
+.env.*

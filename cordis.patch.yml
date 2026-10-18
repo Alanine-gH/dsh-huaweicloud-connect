@@ -1,0 +1,5 @@
+# 注册华为云 CodeArts / OfficeAce 两个 provider，不改动 profile 当前默认模型。
+# 插件直接复用对应桌面 App 的登录态；没有额外 OAuth 流程。
+- insert:
+    - id: llm-huaweicloud
+      name: dsh-huaweicloud-connect
