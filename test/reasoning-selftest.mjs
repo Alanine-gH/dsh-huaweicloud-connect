@@ -37,6 +37,14 @@ async function testAsync(name, fn) {
 }
 
 // ── 1. thinkingLevelMap ────────────────────────────────────────────────
+test("默认探测间隔 ≥ 10 秒（CodeArts 3 个并发槽是服务端按会话计）", () => {
+  // 实测：CodeArts 连发时前 2 个请求成功，第 3 个起就回
+  //   TM.00001041 并发会话数已达上限(3个)
+  // 等约 20 秒才恢复 —— 会话在服务端计，max_tokens:1 结束也不释放。
+  // 所以探测的 9 个请求必须拉开间隔，否则必然撞满并污染后续结论。
+  assert.equal(m.PROBE_REQUEST_INTERVAL_MS, 10_000);
+});
+
 test("thinkingLevelMap 的 value 必须是上游拼写，不是 pi 层级名（最贵的坑）", () => {
   // 真实故障：早期写成 map[level] = level，于是 off 的 value 是 "off"，
   // pi-ai 原样发出 reasoning_effort: "off"；华为上游只认 "none"，于是**每一个
@@ -119,14 +127,14 @@ function senderFor(supported, { baselineOk = true, sentinelAccepts = false, rate
 }
 
 await testAsync("探测：正常模型返回实测支持的档位", async () => {
-  const out = await m.probeModel({ send: senderFor(["low", "high", "max"]), sentinel: () => "probe_sentinel_test" });
+  const out = await m.probeModel({ intervalMs: 0, send: senderFor(["low", "high", "max"]), sentinel: () => "probe_sentinel_test" });
   assert.equal(out.validation, "validating");
   assert.deepEqual(out.efforts, ["low", "high", "max"]);
   assert.equal(out.requests, 1 + 1 + m.EFFORT_CANDIDATES.length, "baseline + sentinel + 全档扫描");
 });
 
 await testAsync("探测：baseline 失败 → unknown，不归因于档位", async () => {
-  const out = await m.probeModel({ send: senderFor([], { baselineOk: false }), sentinel: () => "probe_sentinel_test" });
+  const out = await m.probeModel({ intervalMs: 0, send: senderFor([], { baselineOk: false }), sentinel: () => "probe_sentinel_test" });
   assert.equal(out.validation, "unknown");
   assert.deepEqual(out.efforts, []);
   assert.equal(out.requests, 1, "baseline 失败就该停，不该继续扫");
@@ -134,7 +142,7 @@ await testAsync("探测：baseline 失败 → unknown，不归因于档位", asy
 
 await testAsync("探测：上游不校验参数 → non-validating，不给控制项", async () => {
   // 这是关键防护：上游接受任何值，逐档"接受"全是假阳性
-  const out = await m.probeModel({ send: senderFor([], { sentinelAccepts: true }), sentinel: () => "probe_sentinel_test" });
+  const out = await m.probeModel({ intervalMs: 0, send: senderFor([], { sentinelAccepts: true }), sentinel: () => "probe_sentinel_test" });
   assert.equal(out.validation, "non-validating");
   assert.deepEqual(out.efforts, []);
   assert.equal(out.requests, 2, "baseline + sentinel 就该停");
@@ -142,6 +150,7 @@ await testAsync("探测：上游不校验参数 → non-validating，不给控�
 
 await testAsync("探测：中途限流 → unknown，不写半截结果", async () => {
   const out = await m.probeModel({
+    intervalMs: 0,
     send: senderFor(["low"], { rateLimitOn: ["medium"] }),
     sentinel: () => "probe_sentinel_test",
   });
@@ -151,6 +160,7 @@ await testAsync("探测：中途限流 → unknown，不写半截结果", async 
 
 await testAsync("探测：全档支持", async () => {
   const out = await m.probeModel({
+    intervalMs: 0,
     send: senderFor(m.EFFORT_CANDIDATES),
     sentinel: () => "probe_sentinel_test",
   });
@@ -160,6 +170,7 @@ await testAsync("探测：全档支持", async () => {
 
 await testAsync("探测：传输异常算 unknown", async () => {
   const out = await m.probeModel({
+    intervalMs: 0,
     send: async () => {
       throw new Error("ECONNRESET");
     },
@@ -201,6 +212,7 @@ test("classifyAttempt：CodeArts 并发上限 → unknown（实测踩过的坑�
 await testAsync("探测：baseline 撞并发上限 → unknown，不误判 non-validating", async () => {
   const concurrent = { status: 400, head: '{"error_code":"TM.00001041","error_msg":"并发会话数已达上限(3个)"}' };
   const out = await m.probeModel({
+    intervalMs: 0,
     send: async () => concurrent,
     sentinel: () => "probe_sentinel_test",
   });
@@ -217,6 +229,7 @@ test("classifyAttempt：模型下线/无渠道 → unknown（不可与档位拒�
 
 await testAsync("探测：baseline 就是 403/404 → unknown，不留半截结论", async () => {
   const out = await m.probeModel({
+    intervalMs: 0,
     send: async () => ({ status: 404, head: '{"error":{"code":"ModelArts.81009","message":"Invalid model."}}' }),
     sentinel: () => "probe_sentinel_test",
   });
