@@ -159,6 +159,25 @@ test("classifyAttempt：正常 SSE → accept", () => {
   assert.equal(m.classifyAttempt(0, ""), "unknown", "传输失败是 unknown");
 });
 
+test("classifyAttempt：CodeArts 并发上限 → unknown（实测踩过的坑）", () => {
+  // 真实故障：CodeArts 客户端开着时占满 3 个免费并发槽，探测请求全被拒：
+  //   TM.00001041 并发会话数已达上限(3个)，请关闭部分会话后重试。
+  // 早期版本没识别它 → sentinel 也被「拒绝」→ 误判 non-validating →
+  // 一票否决后 CodeArts 所有模型永远拿不到档位。
+  const concurrent = '{"error_code":"TM.00001041","error_msg":"并发会话数已达上限(3个)，请关闭部分会话后重试。"}';
+  assert.equal(m.classifyAttempt(400, concurrent), "unknown", "并发上限不能当成「上游拒绝该档位」");
+});
+
+await testAsync("探测：baseline 撞并发上限 → unknown，不误判 non-validating", async () => {
+  const concurrent = { status: 400, head: '{"error_code":"TM.00001041","error_msg":"并发会话数已达上限(3个)"}' };
+  const out = await m.probeModel({
+    send: async () => concurrent,
+    sentinel: () => "probe_sentinel_test",
+  });
+  assert.equal(out.validation, "unknown", "并发占满时必须判 unknown，否则会污染缓存");
+  assert.deepEqual(out.efforts, []);
+});
+
 // ── 4. 缓存 ────────────────────────────────────────────────────────────
 const dir = mkdtempSync(join(tmpdir(), "hc-probe-"));
 const file = join(dir, "probes.json");
