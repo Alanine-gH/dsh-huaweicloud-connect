@@ -241,11 +241,25 @@ test("降级后返回的 disposer 可安全调用", () => {
 const ConfigPage = registered.find((r) => r.descriptor.name === "plugins.bundle.config").component;
 const t = ctx.locale.bind("settings.huaweicloud");
 
-test("view=summary 返回一行简介（宿主要求）", () => {
+test("view=summary 返回含简介文案的节点（宿主要求）", () => {
   rendered.length = 0;
   const out = ConfigPage({ view: "summary", t });
-  assert.equal(typeof out, "string");
-  assert.ok(out.length > 0, "简介不该为空");
+  assert.ok(out !== null && typeof out === "object", "summary 应返回渲染节点");
+  assert.ok(textOf(out).length > 0, "简介不该为空");
+});
+
+test("渲染树里 children 真的传下去了（位置参数陷阱的回归）", () => {
+  // 真实故障：React 的 jsx(type, props, key) 第三参是 key 不是 children。
+  // v0.2.0 把 children 改成位置参数后，每个 div 的 children 都是 undefined，
+  // 界面整块空白且不报错。这条断言要求渲染树里存在带 children 的节点。
+  rendered.length = 0;
+  const tree = ConfigPage({ view: "page", t });
+  const withChildren = collect(tree).filter(
+    (node) => node.children !== undefined && node.children !== null && !Array.isArray(node.children) ? false : (node.children ?? []).length > 0,
+  );
+  assert.ok(withChildren.length > 0, "渲染树里没有任何带 children 的节点 —— 位置参数陷阱又出现了");
+  // 并且文本必须非空
+  assert.ok(textOf(tree).length > 0, "整棵渲染树没有任何文字");
 });
 
 /** 深度遍历渲染树，找 tagName。 */
