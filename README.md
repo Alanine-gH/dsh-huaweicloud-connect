@@ -39,26 +39,52 @@ PiAiAdapter(pi-ai) ↔ 127.0.0.1 回环 shim(OpenAI 兼容) ↔ 华为云私有 
 
 前置：本机已安装并**登录过** OfficeAce / CodeArts Agent 至少一次。
 
+### 推荐：从 GitHub Release 安装
+
+```sh
+dsh plugin --profile desktop add github:Alanine-gH/dsh-huaweicloud-connect#v0.1.0
+```
+
+装完**完全退出并重启** DeepSeek Harness 桌面版（Host 插件在启动时加载）。
+
+> **GitHub 需要能访问。** 如果你的机器连不上 github.com（常见于国内网络），
+> 给 git 配一个代理即可，pnpm 解析 GitHub 源时会用上：
+>
+> ```sh
+> git config --global http.proxy 127.0.0.1:<你的代理端口>
+> ```
+
+### 备用：npm（尚未发布）
+
+```sh
+dsh plugin --profile desktop add dsh-huaweicloud-connect@0.1.0
+```
+
+> npm 包目前**未发布**，本项目只发到 GitHub。原因见下方「为什么优先 GitHub」。
+
+### 备用：仓库里的安装脚本
+
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1
 ```
 
-然后**完全退出并重启** DeepSeek Harness 桌面版。
+脚本做三件事：拷插件到 `<profile>/node_modules/`、从已有的 pi-ai 副本拷一份到插件自己的
+`node_modules`（隔离，不动顶层包版本）、幂等更新 `package.json` 的 `dependencies` 与
+`dsh.profile.bundles`。跑完会自检 BOM 并 fail fast。
 
-### 为什么不用 `dsh plugin add`
+### 为什么优先 GitHub 而不是 npm
 
-本机 profile 的 pnpm 解析会被其它插件的浮动 devDependency 拖死：
-某个 GitHub 插件的 `devDependencies` 写着 `@deepseek-ai/dsh-tools: "*"`，pnpm 解析到这个
-浮动范围时会去拉**未公开发布**的 `@deepseek-ai/dsh-type-meta`（npmjs / npmmirror 双 404），
-prepare 阶段失败 → 整次安装回滚。所以本仓库改用「直接放置 + 登记」的安装脚本。
+两条路都实测可用（`pnpm install github:...#v0.1.0` 在隔离沙箱里完整装出并通过诊断 CLI）。
+选 GitHub 的原因：
 
-脚本做三件事：
+- **不需要 npm 账号**。npmjs 的网页注册对新账号有反滥用风控（本次发布时 `www.npmjs.com`
+  返回 403），GitHub 账号你本来就有。
+- **版本与源码天然对齐**。Release tag 就是 git tag，`dsh plugin add github:...#v0.1.0`
+  装到的一定是对应 tag 的代码，不存在「npm 上发布了、GitHub 上还没改」的漂移。
+- **DSH 插件生态里已有先例**：`dsh-workbuddy-connect` 的 README 同样把
+  `github:corrinehu/dsh-workbuddy-connect` 列为推荐安装方式。
 
-1. 拷插件到 `<profile>/node_modules/dsh-huaweicloud-connect`
-2. 从已有的 `@earendil-works/pi-ai@1.3.0` 副本拷一份到插件自己的 `node_modules`（隔离，不动顶层包版本）
-3. 幂等更新 `<profile>/package.json` 的 `dependencies` 与 `dsh.profile.bundles`
-
-> 如果以后 `pnpm` 修好了，`dwsh plugin add dsh-huaweicloud-connect@0.1.0` 也可以。
+如果你所在网络访问 GitHub 顺畅但 npm 也不可用，本插件的 GitHub 源同样能装。
 
 ---
 
