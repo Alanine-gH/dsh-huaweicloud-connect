@@ -46,12 +46,21 @@ test("buildThinkingLevelMap：none 翻译成 off", () => {
   assert.equal(map.max, null);
 });
 
-test("buildThinkingLevelMap：不支持的层级显式给 null（pi-ai 要求）", () => {
-  const map = m.buildThinkingLevelMap(["low"]);
-  for (const level of ["off", "minimal", "medium", "high", "xhigh", "max"]) {
-    assert.equal(map[level], null, `${level} 应为 null`);
-  }
+test("buildThinkingLevelMap：minimal 永远给 null（照 workbuddy 的实测决定）", () => {
+  // pi-ai 认 minimal 这个层级，但 DSH 选择器对它的处理与其它档不同。
+  // workbuddy 实测后决定一律不开（reasoningFields 里 minimal: null）。
+  const map = m.buildThinkingLevelMap(["none", "minimal", "low", "high", "max"]);
+  assert.equal(map.minimal, null, "minimal 必须为 null，否则档位控件可能整体渲染失败");
+  assert.equal(map.off, "off");
   assert.equal(map.low, "low");
+});
+
+test("buildThinkingLevelMap：上游拒绝 none 时 off 必须是 null", () => {
+  // glm-5.3 实测明确回「该模型始终思考，不支持关闭思考」→ 不能给 off
+  const map = m.buildThinkingLevelMap(["low", "high", "max"]);
+  assert.equal(map.off, null, "上游不支持关闭思考时给 off，等于给一个会被拒的选项");
+  assert.equal(map.low, "low");
+  assert.equal(map.max, "max");
 });
 
 test("buildThinkingLevelMap：空集合全 null", () => {
@@ -176,6 +185,23 @@ await testAsync("探测：baseline 撞并发上限 → unknown，不误判 non-v
   });
   assert.equal(out.validation, "unknown", "并发占满时必须判 unknown，否则会污染缓存");
   assert.deepEqual(out.efforts, []);
+});
+
+test("classifyAttempt：模型下线/无渠道 → unknown（不可与档位拒绝混淆）", () => {
+  // 实测：OfficeAce 的 glm-5.2-zx / glm-5.2-harmony / glm.5.2-arkts-spark
+  // baseline 就 403/404，属于模型本身不可用，与"支不支持思考强度"无关。
+  assert.equal(m.classifyAttempt(404, '{"error":{"code":"ModelArts.81009","message":"Invalid model."}}'), "unknown");
+  assert.equal(m.classifyAttempt(403, '{"error":{"code":"ModelArts.81010","message":"No available channel"}}'), "unknown");
+});
+
+await testAsync("探测：baseline 就是 403/404 → unknown，不留半截结论", async () => {
+  const out = await m.probeModel({
+    send: async () => ({ status: 404, head: '{"error":{"code":"ModelArts.81009","message":"Invalid model."}}' }),
+    sentinel: () => "probe_sentinel_test",
+  });
+  assert.equal(out.validation, "unknown");
+  assert.equal(out.requests, 1, "baseline 失败就该停，不该继续扫");
+  assert.match(String(out.reason ?? ""), /baseline 404/);
 });
 
 // ── 4. 缓存 ────────────────────────────────────────────────────────────
