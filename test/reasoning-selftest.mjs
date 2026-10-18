@@ -37,9 +37,30 @@ async function testAsync(name, fn) {
 }
 
 // ── 1. thinkingLevelMap ────────────────────────────────────────────────
-test("buildThinkingLevelMap：none 翻译成 off", () => {
+test("thinkingLevelMap 的 value 必须是上游拼写，不是 pi 层级名（最贵的坑）", () => {
+  // 真实故障：早期写成 map[level] = level，于是 off 的 value 是 "off"，
+  // pi-ai 原样发出 reasoning_effort: "off"；华为上游只认 "none"，于是**每一个
+  // 模型**都回 400：
+  //   parameter check failed, reasoning_effort must be none or low or medium
+  //   or high or xhigh or max
+  //
+  // 表现是"所有模型都不能用"，而不是"off 这一档不好用"——因为 off 是
+  // defaultEffort，每个请求都会带上。
   const map = m.buildThinkingLevelMap(["none", "low", "high"]);
-  assert.equal(map.off, "off", "上游 none 应映射到 pi 的 off");
+  assert.equal(map.off, "none", "off 的 value 必须是上游拼写 none，不是 pi 的 off");
+  assert.notEqual(map.off, "off", "value 若等于 pi 层级名，上游会直接拒绝");
+
+  // value 必须逐个落在上游声明过的档位集合里
+  const efforts = ["none", "low", "high"];
+  for (const [, wire] of Object.entries(map)) {
+    if (wire === null) continue;
+    assert.ok(efforts.includes(wire), `value ${wire} 不在上游支持的档位里`);
+  }
+});
+
+test("buildThinkingLevelMap：上游 none 支持时 off 可用（拼写为 none）", () => {
+  const map = m.buildThinkingLevelMap(["none", "low", "high"]);
+  assert.equal(map.off, "none");
   assert.equal(map.low, "low");
   assert.equal(map.high, "high");
   assert.equal(map.medium, null, "未支持的层级必须是 null，不能省略");
@@ -51,7 +72,7 @@ test("buildThinkingLevelMap：minimal 永远给 null（照 workbuddy 的实测�
   // workbuddy 实测后决定一律不开（reasoningFields 里 minimal: null）。
   const map = m.buildThinkingLevelMap(["none", "minimal", "low", "high", "max"]);
   assert.equal(map.minimal, null, "minimal 必须为 null，否则档位控件可能整体渲染失败");
-  assert.equal(map.off, "off");
+  assert.equal(map.off, "none");
   assert.equal(map.low, "low");
 });
 
