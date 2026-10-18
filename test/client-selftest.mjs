@@ -539,14 +539,15 @@ test("明细页：如实说明不代客户端续期及其原因", () => {
   assert.match(text, /refresh_token/, "应解释原因");
 });
 
-test("三处 fetch 都带 credentials: same-origin", () => {
+test("每一处 fetch 都带 credentials: same-origin", () => {
   // 真实故障：漏掉 same-origin 时浏览器按 CORS 模式发请求，Host 侧回环闸判 403，
   // 客户端显示「读取失败：HTTP 403/404」，而 Host 端实测完全正常（直接打 200）。
   // 这条按源码文本匹配 —— 假的 React 拦不到 fetch 的调用参数。
+  // 用「数量关系」而不是固定数字：新增路由（如 /probe）时不该让断言失效。
   const source = readFileSync(new URL("../lib/client.js", import.meta.url), "utf8");
   const fetches = source.match(/await fetch\(/g) ?? [];
   const withCreds = source.match(/credentials:\s*"same-origin"/g) ?? [];
-  assert.equal(fetches.length, 3, `应有 3 处 fetch，实际 ${fetches.length}`);
+  assert.ok(fetches.length >= 3, `fetch 至少 3 处，实际 ${fetches.length}`);
   assert.ok(
     withCreds.length >= fetches.length,
     `fetch ${fetches.length} 处但 same-origin 只有 ${withCreds.length} 处 —— 有请求没带，回环闸会判 403`,
