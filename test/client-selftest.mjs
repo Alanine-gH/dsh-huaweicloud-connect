@@ -127,6 +127,18 @@ test("id 必须是包名 dsh-huaweicloud-connect", () => {
 const module = loaderArgs.factory(() => fakeReact);
 
 // ── 2. apply() 的注册形状 ───────────────────────────────────────────────
+test("factory 返回 CommonJS 形状且带 Symbol.toStringTag='Module'", () => {
+  // 与 workbuddy 的 bundle 保持一致：factory 返回 module.exports，且该对象
+  // 带 Symbol.toStringTag = "Module"。DSH 的 window.__ModuleLoader__ 按这个
+  // 约定取返回值 —— 返回普通对象字面量时注册静默不发生（页面白屏、无报错）。
+  assert.equal(
+    module[Symbol.toStringTag],
+    "Module",
+    "factory 返回值缺少 Symbol.toStringTag='Module'，加载器可能不认",
+  );
+  assert.equal(typeof module.apply, "function");
+});
+
 test("导出 name / inject / apply", () => {
   assert.equal(typeof module.apply, "function");
   assert.equal(typeof module.name, "string");
