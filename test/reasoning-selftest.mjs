@@ -210,8 +210,35 @@ test("缓存：按账号分桶，互不影响", () => {
 
 test("缓存：落盘是合法 JSON（原子写）", () => {
   const doc = JSON.parse(readFileSync(file, "utf8"));
-  assert.equal(doc.version, 1);
+  assert.equal(typeof doc.version, "number");
+  assert.ok(doc.version >= 2, "缓存格式版本：改判定逻辑时必须提升");
   assert.equal(typeof doc.buckets, "object");
+});
+
+test("缓存：版本号过期时整体作废（判定逻辑变了就不能信旧结论）", () => {
+  // 真实故障：v0.7.1 把 CodeArts 并发上限误判成 non-validating 并写缓存；
+  // v0.7.2 修好了逻辑，但旧缓存指纹没变，新代码读到就认为「已探测」而跳过
+  // —— 误判永久生效。缓存版本号就是为此存在：提升后旧缓存整体作废。
+  const stale = join(dir, "stale.json");
+  const model = { id: "glm-5.3", contextWindow: 202752, maxTokens: 32768, reasoning: true };
+  const fingerprint = JSON.stringify([model.id, model.contextWindow, model.maxTokens, model.reasoning]);
+  writeFileSync(
+    stale,
+    JSON.stringify({
+      version: 1,
+      buckets: {
+        "officeace::acct-1": {
+          "glm-5.3": { modelId: "glm-5.3", fingerprint, validation: "non-validating", efforts: [], probedAt: 1 },
+        },
+      },
+    }),
+    "utf8",
+  );
+
+  const fresh = m.createProbeStore({ file: stale });
+  // 指纹完全对上，但缓存版本是旧的 → 必须读不到，否则误判会永久生效
+  assert.equal(fresh.get("officeace", "acct-1", model), undefined, "旧版本缓存必须作废");
+  assert.equal(fresh.describe("officeace", "acct-1").probed, 0);
 });
 
 test("缓存：坏文件不抛，从空开始", () => {
