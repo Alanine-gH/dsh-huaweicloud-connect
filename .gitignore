@@ -1,4 +1,5 @@
 node_modules/
+dist/
 lib/*.js.map
 *.tsbuildinfo
 .DS_Store
@@ -6,3 +7,4 @@ Thumbs.db
 *.log
 .env
 .env.*
+RELEASE_NOTES_*.md

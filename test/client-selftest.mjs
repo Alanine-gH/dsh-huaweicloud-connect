@@ -266,9 +266,15 @@ function renderPageWithDoc(doc, overrides = {}) {
     onWrite: async () => ({}),
     writePending: false,
     t,
+    onReload: () => {},
     ...overrides,
   });
 }
+
+const SIGNED_IN_MODELS_PRE = [
+  { id: "deepseek-v4.1-flash", name: "DeepSeek-V4.1-Flash", contextWindow: 1_000_000, maxTokens: 384_000, input: ["text"], hidden: false },
+  { id: "glm-5.3", name: "GLM-5.3", contextWindow: 202_752, maxTokens: 65_536, input: ["text"], hidden: true },
+];
 
 test("未登录时渲染出未登录文案与「去开客户端」指引", () => {
   const tree = renderPageWithDoc({
@@ -282,9 +288,10 @@ test("未登录时渲染出未登录文案与「去开客户端」指引", () =>
   assert.match(text, new RegExp(t("signedOut")), "应显示未登录文案");
 });
 
-test("已登录时显示账号、凭据剩余时长与模型勾选列表", () => {
+test("已登录时状态页显示账号与凭据剩余时长", () => {
+  const now = Date.now();
   const tree = renderPageWithDoc({
-    version: "0.1.0",
+    version: "0.2.0",
     products: [
       {
         id: "officeace",
@@ -292,33 +299,24 @@ test("已登录时显示账号、凭据剩余时长与模型勾选列表", () =>
         providerId: "huaweicloud-officeace",
         status: "signed-in",
         account: "user-1",
-        expiresAt: Date.now() + 3600_000,
-        catalogSource: "live",
+        expiresAt: now + 5 * 3600_000,
+        catalogFetchedAt: now,
         modelCount: 2,
-        models: [
-          { id: "glm-5.3", name: "GLM-5.3", contextWindow: 202752, maxTokens: 32768, input: ["text"], hidden: false },
-          { id: "kimi-k2.6", name: "Kimi-K2.6", contextWindow: 262144, maxTokens: 32768, input: ["text", "image"], hidden: true },
-        ],
-        visibility: { perAccount: true, hidden: ["kimi-k2.6"] },
+        hiddenCount: 1,
+        models: SIGNED_IN_MODELS_PRE,
       },
     ],
   });
   const text = textOf(tree);
+  assert.match(text, /OfficeAce/, "应显示产品名");
+  assert.match(text, /已登录/);
   assert.match(text, /user-1/, "应显示账号");
-  assert.match(text, /GLM-5\.3/, "应列出模型名");
-  assert.match(text, /Kimi-K2\.6/, "隐藏的模型也要列出，否则没法取消隐藏");
   assert.match(text, /小时/, "应显示凭据剩余时长");
-
-  // 勾选框：每个模型一个，checked 反映 hidden 的反值
-  const checkboxes = collect(tree).filter((node) => node.type === "input" && node.props.type === "checkbox");
-  assert.equal(checkboxes.length, 2, "应为每个模型一个勾选框");
-  assert.equal(checkboxes[0].props.checked, true, "未隐藏的模型应为勾选态");
-  assert.equal(checkboxes[1].props.checked, false, "隐藏的模型应为未勾选态");
 });
 
 test("凭据过期时提示去客户端续期，而不是显示剩余时长", () => {
   const tree = renderPageWithDoc({
-    version: "0.1.0",
+    version: "0.2.0",
     products: [
       { id: "codearts", displayName: "CodeArts", providerId: "p", status: "signed-in", expired: true, expiresAt: Date.now() - 1000, models: [] },
     ],
@@ -328,16 +326,15 @@ test("凭据过期时提示去客户端续期，而不是显示剩余时长", ()
   assert.match(text, /CodeArts/, "应点名让用户去开哪个客户端");
 });
 
-test("目录来源如实显示 live 与 fallback", () => {
-  const live = renderPageWithDoc({
-    products: [{ id: "officeace", displayName: "OfficeAce", providerId: "p", status: "signed-in", catalogSource: "live", models: [] }],
+test("目录更新时间如实显示（不编造来源标签）", () => {
+  const now = Date.now();
+  const tree = renderPageWithDoc({
+    version: "0.2.0",
+    products: [
+      { id: "officeace", displayName: "OfficeAce", providerId: "p", status: "signed-in", catalogFetchedAt: now, models: [] },
+    ],
   });
-  assert.match(textOf(live), new RegExp(t("catalogLive")));
-
-  const fallback = renderPageWithDoc({
-    products: [{ id: "officeace", displayName: "OfficeAce", providerId: "p", status: "signed-in", catalogSource: "fallback", models: [] }],
-  });
-  assert.match(textOf(fallback), new RegExp(t("catalogFallback")));
+  assert.match(textOf(tree), /模型列表更新于/);
 });
 
 test("status 拉取失败时不抛（错误由 state 承载）", () => {
@@ -352,8 +349,173 @@ test("status 拉取失败时不抛（错误由 state 承载）", () => {
   }
 });
 
+// ── 5. 三个标签页（直接驱动，避免假 React 的 useState 无法切 tab）──────
+const { StatusTab, ContextTab, DetailsTab, formatTokens, remainingText, absoluteTime } = module;
+
+function renderTab(component, props) {
+  rendered.length = 0;
+  return component(props);
+}
+
+const SIGNED_IN_MODELS = [
+  { id: "deepseek-v4.1-flash", name: "DeepSeek-V4.1-Flash", contextWindow: 1_000_000, maxTokens: 384_000, input: ["text"], hidden: false },
+  { id: "glm-5.3", name: "GLM-5.3", contextWindow: 202_752, maxTokens: 65_536, input: ["text"], hidden: true },
+];
+
+test("formatTokens：M / K 缩写", () => {
+  assert.equal(formatTokens(1_000_000), "1M");
+  assert.equal(formatTokens(202_752), "203K");
+  assert.equal(formatTokens(0), "—");
+  assert.equal(formatTokens(undefined), "—");
+});
+
+test("remainingText：分钟/小时/天，超期返回 undefined", () => {
+  const now = Date.now();
+  assert.equal(remainingText(now + 30 * 60_000, now), "30 分钟");
+  assert.equal(remainingText(now + 5 * 3600_000, now), "5 小时");
+  assert.equal(remainingText(now + 3 * 86400_000, now), "3 天");
+  assert.equal(remainingText(now - 1000, now), undefined, "已过期应返回 undefined");
+  assert.equal(remainingText(undefined, now), undefined);
+});
+
+test("absoluteTime：今天只给时刻，往日带日期", () => {
+  const now = new Date(2026, 9, 18, 9, 30).getTime();
+  const today = new Date(2026, 9, 18, 8, 5).getTime();
+  const older = new Date(2026, 9, 15, 14, 30).getTime();
+  assert.equal(absoluteTime(today, now), "08:05");
+  assert.match(absoluteTime(older, now), /10月15日 14:30/);
+});
+
+test("状态页：已登录显示账号与有效期", () => {
+  const now = Date.now();
+  const tree = renderTab(StatusTab, {
+    product: {
+      id: "officeace",
+      displayName: "OfficeAce",
+      status: "signed-in",
+      account: "user-1",
+      expiresAt: now + 5 * 3600_000,
+      sourcePath: "C:\\path\\models.json",
+      catalogFetchedAt: now,
+      modelCount: 2,
+      hiddenCount: 1,
+      models: SIGNED_IN_MODELS,
+    },
+    t,
+    now,
+  });
+  const text = textOf(tree);
+  assert.match(text, /已登录/);
+  assert.match(text, /user-1/, "应显示账号");
+  assert.match(text, /5 小时/, "应显示剩余时长");
+  assert.match(text, /models\.json/, "应显示凭据来源路径");
+});
+
+test("状态页：未登录时给出去开客户端的指引，不显示有效期", () => {
+  const tree = renderTab(StatusTab, {
+    product: { id: "codearts", displayName: "CodeArts", status: "signed-out", reasonCode: "NOT_FOUND" },
+    t,
+    now: Date.now(),
+  });
+  const text = textOf(tree);
+  assert.match(text, /未登录/);
+  assert.match(text, /CodeArts/, "指引里要点名客户端");
+  assert.equal(/有效期/.test(text), false, "未登录时不该显示有效期行");
+});
+
+test("状态页：过期提示优先于剩余时长", () => {
+  const tree = renderTab(StatusTab, {
+    product: { id: "codearts", displayName: "CodeArts", status: "signed-in", expired: true, expiresAt: Date.now() - 1000 },
+    t,
+    now: Date.now(),
+  });
+  const text = textOf(tree);
+  assert.match(text, /过期/);
+  assert.match(text, /CodeArts/);
+});
+
+test("上下文页：每个模型一个勾选框，checked 与 hidden 反值一致", () => {
+  const tree = renderTab(ContextTab, {
+    product: { id: "officeace", models: SIGNED_IN_MODELS },
+    t,
+    onWrite: async () => ({}),
+    writePending: false,
+  });
+  const boxes = collect(tree).filter((n) => n.type === "input" && n.props.type === "checkbox");
+  assert.equal(boxes.length, 2);
+  assert.equal(boxes[0].props.checked, true, "未隐藏应为勾选");
+  assert.equal(boxes[1].props.checked, false, "隐藏应为未勾选");
+});
+
+test("上下文页：显示上下文与输出上限，支持图片的模型带 IMG 标记", () => {
+  const tree = renderTab(ContextTab, {
+    product: {
+      id: "officeace",
+      models: [{ ...SIGNED_IN_MODELS[0], input: ["text", "image"] }],
+    },
+    t,
+    onWrite: async () => ({}),
+    writePending: false,
+  });
+  const text = textOf(tree);
+  assert.match(text, /1M/, "应显示上下文窗口");
+  assert.match(text, /↑384K/, "应显示输出上限");
+  assert.match(text, /IMG/, "多模态模型应标记");
+});
+
+test("上下文页：全选/全不选按钮调 onWrite 且带全部模型 id", () => {
+  const calls = [];
+  const tree = renderTab(ContextTab, {
+    product: { id: "officeace", models: SIGNED_IN_MODELS },
+    t,
+    onWrite: (product, body) => {
+      calls.push({ product, body });
+      return Promise.resolve({});
+    },
+    writePending: false,
+  });
+  const buttons = collect(tree).filter((n) => n.type === "button");
+  const hideAll = buttons.find((b) => textOf(b) === "全部隐藏");
+  assert.ok(hideAll, "应有「全部隐藏」按钮");
+  hideAll.props.onClick();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].product, "officeace");
+  assert.equal(calls[0].body.all, false);
+  assert.deepEqual(calls[0].body.models, ["deepseek-v4.1-flash", "glm-5.3"]);
+});
+
+test("明细页：CodeArts 显示签名鉴权与并发提示，OfficeAce 显示 Basic", () => {
+  const codearts = textOf(
+    renderTab(DetailsTab, {
+      product: { id: "codearts", baseUrl: "https://snap-access.cn-north-4.myhuaweicloud.com" },
+      t,
+    }),
+  );
+  assert.match(codearts, /SDK-HMAC-SHA256/, "CodeArts 应显示签名鉴权");
+  assert.match(codearts, /\/api\/v2\/chat\/completions/);
+  assert.match(codearts, /3 个/, "应提示并发上限");
+
+  const office = textOf(
+    renderTab(DetailsTab, {
+      product: { id: "officeace", baseUrl: "https://modelgw-0009.example.com/v2" },
+      t,
+    }),
+  );
+  assert.match(office, /Basic/, "OfficeAce 应显示 Basic 鉴权");
+  assert.match(office, /modelgw-0009/);
+});
+
+test("明细页：如实说明不代客户端续期及其原因", () => {
+  const text = textOf(renderTab(DetailsTab, { product: { id: "officeace", baseUrl: "x" }, t }));
+  assert.match(text, /不代客户端续期/);
+  assert.match(text, /refresh_token/, "应解释原因");
+});
+
 test("组件函数不是 undefined（挂载不会崩）", () => {
   assert.equal(typeof ConfigPage, "function");
+  assert.equal(typeof StatusTab, "function");
+  assert.equal(typeof ContextTab, "function");
+  assert.equal(typeof DetailsTab, "function");
 });
 
 // ── 汇总 ────────────────────────────────────────────────────────────────

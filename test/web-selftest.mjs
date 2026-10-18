@@ -54,13 +54,20 @@ function fakeRuntime(product, { signedIn = true, models = [], hidden = [] } = {}
       const hiddenIds = new Set(await visibility.hidden(signedIn ? "acct-1" : undefined));
       return {
         store: signedIn
-          ? { signedIn: true, account: "acct-1", sourcePath: `/fake/${product}`, expiresAt: Date.now() + 3600_000 }
+          ? {
+              signedIn: true,
+              account: "acct-1",
+              sourcePath: `/fake/${product}`,
+              expiresAt: Date.now() + 3600_000,
+              baseUrl: `https://modelgw-0009.example.com/v2`,
+            }
           : { signedIn: false, reasonCode: "NOT_FOUND", reason: "未找到登录态" },
         catalog: {
           visible: models.map((m) => ({ ...m, hidden: hiddenIds.has(m.id) })),
           total: models.length,
           hiddenCount: models.filter((m) => hiddenIds.has(m.id)).length,
           source: "live",
+          fetchedAt: 1792200000000,
         },
         visibility: await visibility.describe(signedIn ? "acct-1" : undefined),
         account: signedIn ? "acct-1" : undefined,
@@ -191,6 +198,19 @@ await test("回环 Origin 通过", async () => {
 await test("非 GET 打到 status 返回 405", async () => {
   const res = await call(STATUS_PATH, { method: "POST", body: {} });
   assert.equal(res.status, 405);
+});
+
+await test("status 下发 catalogFetchedAt（客户端状态页要显示更新时间）", async () => {
+  // 假运行时要提供 catalog.fetchedAt，否则客户端「模型列表更新于」永远不显示
+  const doc = await (await call(STATUS_PATH)).json();
+  assert.equal(typeof doc.products[0].catalogFetchedAt, "number", "缺少 catalogFetchedAt");
+});
+
+await test("status 下发 baseUrl（客户端明细页要显示接入点）", async () => {
+  const doc = await (await call(STATUS_PATH)).json();
+  const office = doc.products.find((p) => p.id === "officeace");
+  assert.equal(typeof office.baseUrl, "string", "缺少 baseUrl");
+  assert.match(office.baseUrl, /^https:\/\//, "baseUrl 应是完整 URL");
 });
 
 // ── 3. key 端点 ────────────────────────────────────────────────────────
