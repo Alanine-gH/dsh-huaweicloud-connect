@@ -13,7 +13,7 @@ import { createServer } from "node:http";
 import { canonicalUri, sdkDate, signRequest, sha256Hex, EMPTY_BODY_SHA256 } from "../lib/apig-sign.js";
 import { normalizeChatBody, createShim } from "../lib/shim.js";
 import { parseAuth } from "../lib/drivers/officeace.js";
-import { CONTEXT_WINDOWS, VERIFIED_MODELS, CLIENT_CACHED_MODELS, fallbackModels } from "../lib/drivers/codearts.js";
+import { CONTEXT_WINDOWS, IMAGE_MODELS, fallbackModels } from "../lib/drivers/codearts.js";
 import { createCredentialStore } from "../lib/credentials.js";
 
 const results = [];
@@ -246,26 +246,32 @@ await testAsync("shim：上游没给 [DONE] 时补一个", async () => {
   shim.close();
 });
 
-// ── CodeArts 模型目录：锁住实测结论 ───────────────────────────────────
-// 这组断言的目的是**防止回退**。2026-10-18 实测发现 `/v1/model/builtin`
-// 返回的 7 个模型全部报 unsupported model；若有人"好心"改回用 builtin 列表，
-// 这些断言会立刻炸掉。
-test("实测可用集里第一个是唯一验证过的 deepseek-v4.1-flash", () => {
-  assert.equal(VERIFIED_MODELS[0], "deepseek-v4.1-flash");
-});
-
-test("实测不可用的 builtin 模型不得出现在可选集里", () => {
-  const selectable = [...VERIFIED_MODELS, ...CLIENT_CACHED_MODELS];
-  const knownBad = ["GLM-5.2", "glm-5.2", "kimi-k2.6-vl", "Qwen3-VL-235B", "glm-5.2-sft-harmony"];
-  for (const id of knownBad) {
-    assert.equal(selectable.includes(id), false, `${id} 实测报 unsupported model，不该进可选集`);
+// ── CodeArts 模型目录：直读上游 ───────────────────────────────────────
+// 这组断言的目的是**防止回退**。2026-10-23 实测：`/v1/model/builtin` 返回
+// 9 个真实模型（含 GLM-5.2、kimi-k3、glm-5.2-sft-harmony），而旧版写死的
+// 7 个里有 3 个（deepseek-v4-flash-0731 / deepseek-v4-pro-0813 / glm-5.3-flash）
+// 在目录里根本不存在——是"幽灵模型"。listModels 现在直读目录，不再写死。
+test("CONTEXT_WINDOWS 覆盖目录里所有 display_enabled 的模型", () => {
+  // 2026-10-23 实测的目录快照（display_enabled=true 的 7 个）
+  const displayModels = [
+    "GLM-5.2",
+    "openpangu-2.0-flash",
+    "openpangu-2.0-pro",
+    "glm-5.3",
+    "glm-5.2-sft-harmony",
+    "deepseek-v4.1-flash",
+    "kimi-k3",
+  ];
+  for (const id of displayModels) {
+    assert.ok(CONTEXT_WINDOWS[id] !== undefined, `${id} 缺上下文窗口记录（目录里有这个模型）`);
   }
 });
 
-test("可选集里每个模型都有上下文窗口记录", () => {
-  for (const id of [...VERIFIED_MODELS, ...CLIENT_CACHED_MODELS]) {
-    assert.ok(CONTEXT_WINDOWS[id], `${id} 缺上下文窗口记录，会被 listModels 过滤掉`);
-  }
+test("图片模型集合覆盖目录里 supports_images=true 的两个", () => {
+  // Qwen3-VL-235B / kimi-k2.6-vl 在目录里 enable=true 但 display_enabled=false；
+  // 它们由 toModelInfo 的 IMAGE_MODELS 集合处理，这里锁住集合本身
+  assert.ok(IMAGE_MODELS.has("Qwen3-VL-235B"));
+  assert.ok(IMAGE_MODELS.has("kimi-k2.6-vl"));
 });
 
 test("兜底目录只给已验证的模型", () => {
