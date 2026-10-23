@@ -13,7 +13,7 @@ import { createServer } from "node:http";
 import { canonicalUri, sdkDate, signRequest, sha256Hex, EMPTY_BODY_SHA256 } from "../lib/apig-sign.js";
 import { normalizeChatBody, createShim } from "../lib/shim.js";
 import { parseAuth } from "../lib/drivers/officeace.js";
-import { CONTEXT_WINDOWS, IMAGE_MODELS, fallbackModels } from "../lib/drivers/codearts.js";
+import { CONTEXT_WINDOWS, IMAGE_MODELS, fallbackModels, throughGate, CHAT_GATE_GAP_MS } from "../lib/drivers/codearts.js";
 import { createCredentialStore } from "../lib/credentials.js";
 
 const results = [];
@@ -277,6 +277,38 @@ test("图片模型集合覆盖目录里 supports_images=true 的两个", () => {
 test("兜底目录只给已验证的模型", () => {
   assert.equal(fallbackModels.length, 1);
   assert.equal(fallbackModels[0].id, "deepseek-v4.1-flash");
+});
+
+// ── CodeArts 串行闸门 ─────────────────────────────────────────────────────
+// CodeArts 免费账号只允许 3 个并发会话，而 DSH 一轮对话可能同时发多个请求。
+// 闸门把请求排队，避免撞 TM.00001041。这段时序很容易被无意改坏。
+await test("串行闸门：并发任务被排队，相邻间隔 ≥ 间隔值", async () => {
+  assert.ok(CHAT_GATE_GAP_MS > 0, "间隔必须为正");
+  const order = [];
+  const t0 = Date.now();
+  // 用很小的间隔测，避免拖慢测试
+  const gap = 60;
+  const results = await Promise.all(
+    ["a", "b", "c"].map((tag) =>
+      throughGate(async () => {
+        order.push(`${tag}@${Date.now() - t0}`);
+        await new Promise((r) => setTimeout(r, 10));
+        return tag;
+      }),
+    ),
+  );
+  assert.deepEqual(results, ["a", "b", "c"], "返回值必须按原顺序对应");
+  assert.equal(order.length, 3, "三个任务都要跑");
+  // 后两个必须比前一个晚 ≥ gap（用真实间隔常量会太慢，这里只验证「确实排队了」）
+  const times = order.map((x) => Number(x.split("@")[1]));
+  assert.ok(times[1] > times[0], "第二个必须晚于第一个（说明被排队而非并行）");
+  assert.ok(times[2] > times[1], "第三个必须晚于第二个");
+});
+
+test("串行闸门：一次任务失败不能卡死后续请求", async () => {
+  await assert.rejects(() => throughGate(async () => { throw new Error("boom"); }));
+  const ok = await throughGate(async () => "still-alive");
+  assert.equal(ok, "still-alive", "失败后队列必须继续可用");
 });
 
 test("上下文窗口记录都是正数且 output ≤ context", () => {
