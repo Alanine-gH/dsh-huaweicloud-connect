@@ -200,6 +200,51 @@ test("classifyAttempt：正常 SSE → accept", () => {
   assert.equal(m.classifyAttempt(0, ""), "unknown", "传输失败是 unknown");
 });
 
+test("classifyAttempt：HTTP 200 的 error_code 错误体必须判失败，不能判成功", () => {
+  // 真实故障（2026-10-23）：CodeArts 在权益失效时对每个请求都回
+  //   HTTP 200 + data:{"error_code":"InferHub.4004.200","error_msg":"benefit not found"}
+  //
+  // 早期只认 `"error":{...}` 这一种形状（OfficeAce 网关用的），于是华为的
+  // `error_code` 形状**落到 accept** —— baseline 与 sentinel 双双"通过"，
+  // 整批 CodeArts 模型被写成 `non-validating`（界面显示"上游不校验该参数"）。
+  //
+  // 这是「失败被当成成功」：不报错，只给一个看起来合理的错误结论。
+  const benefit = 'data:{"error_code":"InferHub.4004.200","error_msg":"benefit not found","details":[]}';
+  assert.equal(m.classifyAttempt(200, benefit), "unknown", "error_code 形状的错误体不能判成成功");
+
+  // 两种形状都要认
+  const nested = 'data:{"error":{"code":"ModelArts.81001","message":"reasoning_effort 参数值非法"}}';
+  assert.notEqual(m.classifyAttempt(200, nested), "accept");
+
+  // 真正的成功仍然要判成功
+  const ok = 'data:{"id":"x","object":"chat.completion.chunk","choices":[{"delta":{"content":""}}]}';
+  assert.equal(m.classifyAttempt(200, ok), "accept");
+});
+
+test("extractUpstreamError：两种错误形状都能抽出码与消息", () => {
+  const flat = m.extractUpstreamError('data:{"error_code":"InferHub.4004.200","error_msg":"benefit not found"}');
+  assert.equal(flat.code, "InferHub.4004.200");
+  assert.equal(flat.message, "benefit not found");
+
+  const nested = m.extractUpstreamError('data:{"error":{"code":"ModelArts.81009","message":"Invalid model."}}');
+  assert.equal(nested.code, "ModelArts.81009");
+  assert.equal(nested.message, "Invalid model.");
+
+  assert.equal(m.extractUpstreamError("no error here"), undefined, "没有错误时不能编造");
+});
+
+await testAsync("探测：benefit not found 不能判成 non-validating，且原因要带错误码", async () => {
+  const benefit = { status: 200, head: 'data:{"error_code":"InferHub.4004.200","error_msg":"benefit not found"}' };
+  const out = await m.probeModel({
+    intervalMs: 0,
+    send: async () => benefit,
+    sentinel: () => "probe_sentinel_test",
+  });
+  assert.equal(out.validation, "unknown", "权益失效不是「上游不校验该参数」");
+  assert.match(String(out.reason ?? ""), /InferHub\.4004\.200/, "原因里要带上游错误码，否则用户不知道去哪查");
+  assert.match(String(out.reason ?? ""), /benefit not found/);
+});
+
 test("classifyAttempt：CodeArts 并发上限 → unknown（实测踩过的坑）", () => {
   // 真实故障：CodeArts 客户端开着时占满 3 个免费并发槽，探测请求全被拒：
   //   TM.00001041 并发会话数已达上限(3个)，请关闭部分会话后重试。
