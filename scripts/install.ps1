@@ -86,7 +86,7 @@ $piAiCandidates = @($piAiCandidates)
 if ($piAiCandidates.Count -eq 0) {
   throw @"
 没找到可复用的 @earendil-works/pi-ai 依赖树。
-本插件依赖 @earendil-works/pi-ai@1.3.0（DSH 0.2.1-rc.2 对应版本）。
+本插件依赖 @earendil-works/pi-ai@1.3.0（DSH 0.2.1 系列对应版本）。
 
 三种解决办法，任选其一：
   1) 先安装 dsh-workbuddy-connect（它自带同一份 pi-ai），本脚本会自动复用它那份

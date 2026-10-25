@@ -39,13 +39,19 @@ PiAiAdapter(pi-ai) ↔ 127.0.0.1 回环 shim(OpenAI 兼容) ↔ 华为云私有 
 
 前置：本机已安装并**登录过** OfficeAce / CodeArts Agent 至少一次。
 
-### 推荐：从 GitHub Release 安装
+### 推荐：从 npm 安装
 
 ```sh
-dsh plugin --profile desktop add github:Alanine-gH/dsh-huaweicloud-connect#v0.1.0
+dsh plugin --profile desktop add dsh-huaweicloud-connect@0.7.13
 ```
 
 装完**完全退出并重启** DeepSeek Harness 桌面版（Host 插件在启动时加载）。
+
+### 备用：从 GitHub Release 安装
+
+```sh
+dsh plugin --profile desktop add github:Alanine-gH/dsh-huaweicloud-connect#v0.7.13
+```
 
 > **GitHub 需要能访问。** 如果你的机器连不上 github.com（常见于国内网络），
 > 给 git 配一个代理即可，pnpm 解析 GitHub 源时会用上：
@@ -53,14 +59,6 @@ dsh plugin --profile desktop add github:Alanine-gH/dsh-huaweicloud-connect#v0.1.
 > ```sh
 > git config --global http.proxy 127.0.0.1:<你的代理端口>
 > ```
-
-### 备用：npm（尚未发布）
-
-```sh
-dsh plugin --profile desktop add dsh-huaweicloud-connect@0.1.0
-```
-
-> npm 包目前**未发布**，本项目只发到 GitHub。原因见下方「为什么优先 GitHub」。
 
 ### 备用：仓库里的安装脚本
 
@@ -72,19 +70,15 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1
 `node_modules`（隔离，不动顶层包版本）、幂等更新 `package.json` 的 `dependencies` 与
 `dsh.profile.bundles`。跑完会自检 BOM 并 fail fast。
 
-### 为什么优先 GitHub 而不是 npm
+### 版本兼容范围
 
-两条路都实测可用（`pnpm install github:...#v0.1.0` 在隔离沙箱里完整装出并通过诊断 CLI）。
-选 GitHub 的原因：
+声明了 `engines.dsh`：`>=0.2.1-rc.2 <0.3.0-0`，即 DSH **0.2.1 整个系列**（含 rc.2 / rc.3 及
+后续 0.2.x）。0.2.0 及更早、0.3.0 及更晚都会被兼容门禁拒绝。
 
-- **不需要 npm 账号**。npmjs 的网页注册对新账号有反滥用风控（本次发布时 `www.npmjs.com`
-  返回 403），GitHub 账号你本来就有。
-- **版本与源码天然对齐**。Release tag 就是 git tag，`dsh plugin add github:...#v0.1.0`
-  装到的一定是对应 tag 的代码，不存在「npm 上发布了、GitHub 上还没改」的漂移。
-- **DSH 插件生态里已有先例**：`dsh-workbuddy-connect` 的 README 同样把
-  `github:corrinehu/dsh-workbuddy-connect` 列为推荐安装方式。
-
-如果你所在网络访问 GitHub 顺畅但 npm 也不可用，本插件的 GitHub 源同样能装。
+理由不是猜的：rc.2 → rc.3 里本插件用到的四个包（`dsh-llm`、`dsh-llm-pi-ai`、
+`dsh-home-paths`、`dsh-client-ui-renderer`/`dsh-client-locale`）**逐个文件 SHA-256 相同**，
+唯一差异是 `package.json` 里的版本号本身。早先版本把 peer 钉成精确 `0.2.1-rc.2`，
+在 DSH 升到 rc.3 后就被判不兼容（`reasonIncompatibleVersion`）——那是一次误报。
 
 ---
 
@@ -161,6 +155,10 @@ node ... status --provider officeace
 ```
 lib/
 ├── index.js          Host 插件入口：provider 注册、catalog、轮询
+├── client.js         Web 半边：设置界面（plugins.bundle.config slot）
+├── web.js            同源只读 status / 写 visibility 路由
+├── visibility.js     模型显隐存储（按账号分桶）
+├── reasoning.js      推理档位探测 + 缓存
 ├── shim.js           回环 OpenAI 兼容 shim（四道闸 + 请求归一化 + SSE 兜底）
 ├── credentials.js    登录态复用：定位 → 分类 → 副本 → 刷新 → 降级
 ├── apig-sign.js      华为 APIG SDK-HMAC-SHA256 签名器（纯函数）
@@ -170,17 +168,22 @@ lib/
     └── codearts.js   AK/SK 签名 + state.vscdb 凭据
 
 test/
-├── selftest.mjs      离线自测（15 项，不需要 DSH，不发网络请求）
-└── live-probe.mjs    真实只读探测（只发 GET /models）
+├── selftest.mjs        离线自测（21 项：签名 / 归一化 / 凭据 / shim / 串行闸）
+├── sign-selftest.mjs   签名专项（25 项）
+├── web-selftest.mjs    status / visibility 路由（34 项）
+├── client-selftest.mjs 客户端模块契约（33 项）
+├── reasoning-selftest.mjs 推理档位探测（40 项）
+├── live-probe.mjs      真实只读探测（只发 GET /models）
+└── host/               测试台用的离线替身（dsh-llm / dsh-llm-pi-ai / schemastery）
 
 scripts/install.ps1   绕开 pnpm 的安装脚本
 ```
 
-自测：
+自测（全部离线，不需要 DSH 也不需要网络）：
 
 ```powershell
-node test\selftest.mjs      # 15/15
-node test\live-probe.mjs    # 会访问真实上游，只发 GET
+npm test                              # 153/153（五套串跑）
+node test\live-probe.mjs              # 会访问真实上游，只发 GET
 ```
 
 ---
