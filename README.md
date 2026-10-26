@@ -74,20 +74,32 @@ PiAiAdapter(pi-ai) ↔ 127.0.0.1 回环 shim(OpenAI 兼容) ↔ 华为云私有 
 
 ## 安装
 
-前置：本机已安装并**登录过** OfficeAce / CodeArts Agent 至少一次。
+前置：CodeArts 需配置 CLI 授权（长期 AK/SK）或登录过 CodeArts Agent；
+OfficeAce 需登录过客户端至少一次。详见上面「CodeArts 授权：为什么优先用 CLI」。
 
 ### 推荐：从 npm 安装
 
 ```sh
-dsh plugin --profile desktop add dsh-huaweicloud-connect@0.7.13
+# 装最新版
+dsh plugin --profile desktop add dsh-huaweicloud-connect@latest
+
+# 或锁定具体版本（把 <version> 换成你想要的版本号）
+dsh plugin --profile desktop add dsh-huaweicloud-connect@<version>
 ```
 
 装完**完全退出并重启** DeepSeek Harness 桌面版（Host 插件在启动时加载）。
 
+> 这里刻意不写死版本号：写死过一次，发版时忘了同步，导致 README 一直指向旧版本。
+> 需要具体版本时看 [npm 版本列表](https://www.npmjs.com/package/dsh-huaweicloud-connect?activeTab=versions)。
+
 ### 备用：从 GitHub Release 安装
 
 ```sh
-dsh plugin --profile desktop add github:Alanine-gH/dsh-huaweicloud-connect#v0.7.13
+# 跟随仓库最新 tag
+dsh plugin --profile desktop add github:Alanine-gH/dsh-huaweicloud-connect
+
+# 或锁定 tag（把 <tag> 换成 v0.8.0 这样的具体标签）
+dsh plugin --profile desktop add github:Alanine-gH/dsh-huaweicloud-connect#<tag>
 ```
 
 > **GitHub 需要能访问。** 如果你的机器连不上 github.com（常见于国内网络），
