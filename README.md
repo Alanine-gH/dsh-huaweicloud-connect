@@ -7,13 +7,50 @@
 不读取、不保存用户口令。
 
 - OfficeAce 分组：直连华为云模型网关（21 个模型，含 DeepSeek-V4 / GLM-5.x / Kimi / Pangu / Qwen）
-- CodeArts 分组：直连 `snap-access` 网关，走 APIG `SDK-HMAC-SHA256` 签名
+- CodeArts 分组：直连 `snap-access` 网关，走 APIG `SDK-HMAC-SHA256` 签名。
+  **支持官方 CLI 授权（IAM 长期 AK/SK）**，配好之后永不过期、也不依赖客户端在跑
 
 > 状态：**两端均已端到端实测通过**。
 > - OfficeAce：真实请求拿到 21 个模型，并完成一次真实流式对话（模型回复正常）。
-> - CodeArts：凭据读取、APIG 签名（服务端返回 200）、模型目录、真实对话均已验证。
+> - CodeArts：CLI 授权（长期 AK/SK）下，模型目录 9 个、真实对话 `finish_reason: stop` 且正文正常。
 >
-> CodeArts 的模型目录有一处**实测坑**，见下文「模型目录为什么不能信接口返回」。
+> CodeArts 有**两个实测坑**，见下文「CodeArts 授权：为什么优先用 CLI」。
+
+---
+
+## CodeArts 授权：为什么优先用 CLI
+
+插件支持两种凭据，实测能力**不一样**：
+
+| 凭据 | 是否签 `maas_type: benefit` | 对话结果 |
+|---|---|---|
+| 客户端登录态（临时 STS，约 1 小时） | 是 | `benefit not found` |
+| 客户端登录态（临时 STS） | 否 | `TM.00001041` |
+| **IAM 长期 AK/SK（CLI 授权）** | 是 | `benefit not found` |
+| **IAM 长期 AK/SK（CLI 授权）** | **否** | ✅ 正常返回正文 |
+
+两条结论：
+
+1. **`maas_type: benefit` 是「免费权益通道」的声明头。** 该通道不可用时，任何带它的请求都回
+   `InferHub.4004.200 benefit not found` —— 即使 HTTP 状态是 200（错误藏在 SSE 首帧里）。
+   所以本插件只在 STS 模式下签它，AK/SK 模式**不签**。
+2. **CLI 授权是更优路径**：永不过期，且不需要 CodeArts Agent 在运行。
+
+配置方式二选一（改完重启 DSH）：
+
+```powershell
+# 方式一：环境变量（官方推荐，暴露面最小）
+$env:CODEARTS_CLI_AK = "<Access Key Id>"
+$env:CODEARTS_CLI_SK = "<Secret Access Key>"
+```
+
+方式二：把华为云 IAM 控制台导出的 `credentials.csv` 放到
+`~/.dsh/.huaweicloud-connect/credentials.csv`（建议把 ACL 收到仅当前用户）。
+
+- 创建 AK/SK：https://console.huaweicloud.com/iam/#/mine/accessKey
+- CLI 授权指导：https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_0026.html
+
+未配置时插件会回落到客户端登录态，功能不受影响，只是需要每小时续期。
 
 ---
 
@@ -24,7 +61,7 @@
 | 产品 | 鉴权 | 说明 |
 |---|---|---|
 | OfficeAce | `Authorization: Basic base64(app_key:app_secret)` | APIG「APP 认证」，值已存在于本地明文文件 |
-| CodeArts | `Authorization: SDK-HMAC-SHA256 Access=…, SignedHeaders=…, Signature=…` | 需 AK/SK + `X-Security-Token` 现算签名 |
+| CodeArts | `Authorization: SDK-HMAC-SHA256 Access=…, SignedHeaders=…, Signature=…` | 需 AK/SK（+ 可选 `X-Security-Token`）现算签名 |
 
 所以插件用「回环 shim」结构：对 pi-ai 暴露一个标准 OpenAI endpoint，把签名/自定义头
 收在 shim 内部。
@@ -137,13 +174,17 @@ node ... status --provider officeace
   IDE 下发的 `inferhub-provider` 只有 5 个，同样不含任何可用模型。真正可用的是客户端
   `model-cache-hook` 记录过的那批，其中 `deepseek-v4.1-flash` 已实测确认可用。
   本插件因此把 `/v1/model/builtin` 只当**探针**（验证凭据与签名是否正常），可选模型另用实测集。
-- **CodeArts 有并发会话上限 3 个**：客户端开着时占满名额，插件发请求会得到
-  `TM.00001041 并发会话数已达上限(3个)`。关掉客户端即可。
-- **CodeArts 需要客户端在跑**：STS 由客户端每小时续期，插件不代劳。
+- **`TM.00001041`「并发会话数已达上限(3个)」这个文案是错的**：它**不是**真实并发会话占满。
+  2026-10-26 实测：串行单请求、间隔 5~8 秒、客户端进程数为 0，照样复现；且同一 token 同一模型下
+  `benefit not found`(200) 与 `TM.00001041`(400) 会交替出现，请求耗时始终 120~190ms。
+  它是**网关侧节奏/配额限流**，插件按 429 处理并自动退避重试，不再触发模型熔断。
+  （历史提示「关掉客户端即可」是错的，已删除。）
+- **CodeArts 需要客户端在跑 —— 仅限 STS 模式**。改用 CLI 授权（长期 AK/SK）后不再需要。
 - **OfficeAce 的 `models.json` 只在客户端跑过一次后落盘**：全新安装且从未登录时分组不显示。
 - **上下文窗口是内置快照**：两个上游的模型列表接口都不返回 context window，用的是客户端内置元数据表
   （见 `lib/drivers/*.js` 里的 `CONTEXT_WINDOWS`）。上游上架新模型时会退回保守默认值。
-- **模型目录是全量目录**：能列出来 ≠ 当前账号有权限。没有权限的模型会返回 `ModelArts.81004/81009`。
+- **模型目录是全量目录**：能列出来 ≠ 当前账号有权限。没有权限的模型会返回 `ModelArts.81004/81009`；
+  CodeArts 还会出现「目录 9 个模型、但每个对话都回 `benefit not found`」的情况（权益未开通）。
 - **与 `deepseek-harness-codearts` 的关系**：npm 上存在一个独立插件 `deepseek-harness-codearts`，
   它自己完成 CodeArts 的 OAuth 登录（不读桌面凭据）。两者可以共存（provider id 不同：
   本插件是 `huaweicloud-codearts`，它是 `codearts`），但会看到两个 CodeArts 分组。

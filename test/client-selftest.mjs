@@ -512,7 +512,7 @@ test("上下文页：全选/全不选按钮调 onWrite 且带全部模型 id", (
   assert.deepEqual(calls[0].body.models, ["deepseek-v4.1-flash", "glm-5.3"]);
 });
 
-test("明细页：CodeArts 显示签名鉴权与并发提示，OfficeAce 显示 Basic", () => {
+test("明细页：CodeArts 显示签名鉴权与限流说明，OfficeAce 显示 Basic", () => {
   const codearts = textOf(
     renderTab(DetailsTab, {
       product: { id: "codearts", baseUrl: "https://snap-access.cn-north-4.myhuaweicloud.com" },
@@ -521,7 +521,12 @@ test("明细页：CodeArts 显示签名鉴权与并发提示，OfficeAce 显示 
   );
   assert.match(codearts, /SDK-HMAC-SHA256/, "CodeArts 应显示签名鉴权");
   assert.match(codearts, /\/api\/v2\/chat\/completions/);
-  assert.match(codearts, /3 个/, "应提示并发上限");
+  // 这条提示曾经写的是「客户端运行时最多占用 3 个免费会话」——错的。
+  // 2026-10-26 实测：串行单请求、客户端未开也会撞 TM.00001041，它是网关限流。
+  // 所以断言改为「说明这是限流且会自动重试」，而不是锁住「3 个」这个数字。
+  assert.match(codearts, /限流/, "应说明这是网关限流");
+  assert.match(codearts, /重试/, "应说明会自动重试");
+  assert.doesNotMatch(codearts, /最多占用 3 个免费会话/, "不应再宣称会话数上限");
 
   const office = textOf(
     renderTab(DetailsTab, {
