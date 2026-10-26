@@ -1,8 +1,8 @@
-﻿{
+{
   "name": "dsh-huaweicloud-connect",
   "displayName": "DSH HuaweiCloud Connect",
   "description": "将华为云 CodeArts 与 OfficeAce 桌面应用已登录的模型接入 DeepSeek Harness — 复用本地登录态，零额外配置。",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "author": "Alanine-孔硕",
   "keywords": [
     "dsh-plugin",
